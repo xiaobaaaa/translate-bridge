@@ -100,7 +100,7 @@ Your choice is remembered across sessions.
 
 ### What isn't translated
 
-- The count lines such as "Ran 5 commands" are drawn by Claude Code itself and contain no text the mod can change.
+- Count lines such as "Ran a command" or "Read 3 files" are written by Claude Code itself, and the mod has no text to change there. Instead, a folded group that contains a step with a description is shown unfolded, so each of those steps shows its own bilingual label. Groups of steps without descriptions (such as file reads) stay folded.
 - Steps that only show a file name or a path.
 - The details inside a tool call (command output, file contents).
 
@@ -150,4 +150,4 @@ To run your working copy instead of the installed version, start Claude Code wit
 
 **命令**：`/translate on`（中英对照，默认）、`/translate only`（只显示中文）、`/translate off`、`/translate status`。
 
-**注意**：你的提示和 Claude 的回复会发给你配置的翻译服务商。代码块和 "Ran 5 commands" 这类计数行不翻译。
+**注意**：你的提示和 Claude 的回复会发给你配置的翻译服务商。代码块不翻译。"Ran a command" 这类计数行是 Claude Code 自己生成的，没法翻译；所以凡是含有带说明步骤的折叠组，都会自动展开，让每一步显示自己的中英对照标签。

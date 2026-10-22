@@ -443,10 +443,15 @@ export const register: Register = (on, options) => {
     return next({ ...e, props: { ...e.props, input } })
   })
 
-  // Steps folded into a group get the same; the count line ("Ran 5 commands") is the app's own.
+  // A folded group shows the app's own count line ("Ran a command"), which has no text to
+  // translate. So a group with a labelled step is unfolded: each step then draws as a ToolUse
+  // row with its own label, which the hook above translates.
   on('ui.render', { component: 'ToolGroup' }, async ($, e, next) => {
     const current = await read($, mode)
     if (current === 'off') return next(e)
+    if (!e.props.isExpanded && e.props.calls.some(call => labelOf(call.tool, call.input))) {
+      return next({ ...e, props: { ...e.props, isExpanded: true } })
+    }
     let changed = false
     const calls = await Promise.all(
       e.props.calls.map(async (call, index) => {

@@ -253,7 +253,47 @@ test('a step label is shown bilingually', async ($, on) => {
   expect(await drawnText(ui)).toContain('这里是文件列表。 / List files in current directory')
 })
 
-test('each step in a folded group is shown bilingually', async ($, on) => {
+test('a folded group with labelled steps is unfolded, so each step shows its own label', async ($, on) => {
+  const seen: Request[] = []
+  mock.env(on, KEY)
+  fakeApi(on, seen)
+  on('ui.render', { component: 'ToolGroup' }, ($, e) => {
+    const { Text } = $.ui.resolve(e)
+    return h(Text, null, e.props.isExpanded ? 'unfolded' : 'Ran 2 commands') as RenderElement
+  })
+
+  const ui = await $.ui.mount({
+    plugin: 'translate-bridge',
+    surface: 'desktop',
+    component: 'ToolGroup',
+    props: {
+      calls: [bash('u1', 'Show working tree status'), bash('u2', 'Install package dependencies')],
+      isActive: false,
+      isExpanded: false,
+    },
+  })
+  expect(await drawnText(ui)).toContain('unfolded')
+})
+
+test('a folded group of steps with no label stays folded', async ($, on) => {
+  mock.env(on, KEY)
+  fakeApi(on, [])
+  on('ui.render', { component: 'ToolGroup' }, ($, e) => {
+    const { Text } = $.ui.resolve(e)
+    return h(Text, null, e.props.isExpanded ? 'unfolded' : 'Read 2 files') as RenderElement
+  })
+  const read = (id: string) => ({ ...bash(id, ''), tool: 'Read', input: { file_path: '/tmp/a' } })
+
+  const ui = await $.ui.mount({
+    plugin: 'translate-bridge',
+    surface: 'desktop',
+    component: 'ToolGroup',
+    props: { calls: [read('r1'), read('r2')], isActive: false, isExpanded: false },
+  })
+  expect(await drawnText(ui)).toContain('Read 2 files')
+})
+
+test('each step in an unfolded group is shown bilingually', async ($, on) => {
   const seen: Request[] = []
   const clock = mock.clock(on)
   mock.env(on, KEY)
@@ -267,7 +307,7 @@ test('each step in a folded group is shown bilingually', async ($, on) => {
     props: {
       calls: [bash('g1', 'Show working tree status'), bash('g2', 'Install package dependencies')],
       isActive: false,
-      isExpanded: false,
+      isExpanded: true,
     },
   })
   await clock.advance(2000)

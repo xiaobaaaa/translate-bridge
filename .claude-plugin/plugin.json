@@ -1,11 +1,20 @@
 {
   "name": "translate-bridge",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Write to Claude in your own language: prompts go to Claude in English, and replies and step labels are shown in your language beside the English. Uses any OpenAI-compatible API (DeepSeek by default).",
-  "author": { "name": "xiaobaaaa" },
+  "author": {
+    "name": "xiaobaaaa"
+  },
   "homepage": "https://github.com/xiaobaaaa/translate-bridge",
   "license": "MIT",
-  "keywords": ["translation", "i18n", "chinese", "bilingual", "deepseek", "mod"],
+  "keywords": [
+    "translation",
+    "i18n",
+    "chinese",
+    "bilingual",
+    "deepseek",
+    "mod"
+  ],
   "types": "./types/index.d.ts",
   "userConfig": {
     "language": {
