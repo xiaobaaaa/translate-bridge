@@ -110,6 +110,15 @@ Translation is cheap. On DeepSeek's October 2026 price list, translating a mediu
 
 Your choices are remembered across sessions.
 
+### In a session that is already open
+
+A new session always loads the mod. For a session that is already running:
+
+- **The mod loaded when the session started** (an older version, or before you changed its options): run `/reload-plugins`, then `/translate status` to check. `/reload-plugins` reloads only mods that loaded at the start.
+- **The mod was not loaded at all** (the session started before you installed it): ask Claude in that session to copy the mod's folder into the session's own mods folder. Claude Code then asks whether to turn on mod hot-reloading for the session. Say yes, and the mod loads right away, without a restart, and reloads by itself when its files change. If you say no, it loads the next time that session starts.
+
+Use the second way only where the mod isn't loaded already, or it runs twice and everything is translated twice. The copy belongs to that session and doesn't follow later updates; remove it before you restart the session, since a restarted session loads the installed mod as well.
+
 ### What happens, and when
 
 - Prompts that are already English are sent unchanged, with no API call. Slash commands are never translated.
@@ -168,6 +177,8 @@ To run your working copy instead of the installed version, start Claude Code wit
 
 **安装**：在桌面 App 里点输入框旁的 **+** → **Plugins** → **Add marketplace**，填 `xiaobaaaa/translate-bridge` → **Add plugin**。在终端会话里，也可以用上面英文部分的 `/plugin install` 命令。安装时填 API key，也可以在 `~/.claude/settings.json` 的 `env` 里设 `TRANSLATE_BRIDGE_API_KEY`。然后新开会话，运行 `/translate status` 检查。
 
-**命令**：`/translate on`（中英对照，默认）、`/translate original-first`（原文在上，默认）、`/translate translation-first`（译文在上）、`/translate only`（只显示中文）、`/translate off`、`/translate status`。
+**命令**：`/translate on`（中英对照，默认）、`/translate original-first`（原文在上，默认）、`/translate translation-first`（译文在上）、`/translate only`（只显示中文）、`/translate off`、`/translate provider [名称 | default]`（列出或切换翻译服务商，当前会话立即生效）、`/translate status`。
+
+**已经开着的会话**：新开的会话总会加载本 mod。会话启动时已加载过本 mod（比如旧版本，或改设置之前）：运行 `/reload-plugins`，再用 `/translate status` 检查。会话启动时没加载本 mod（安装之前就开着）：在那个会话里让 Claude 把本 mod 的文件夹复制进该会话自己的 mods 文件夹，Claude Code 会问是否为这个会话打开 mod 热加载，同意后立即加载、不用重启，文件改动后会自动重载。只在没加载本 mod 的会话里这样做，否则会加载两份、每段都翻译两次；这份副本只属于那个会话、不跟随后续更新，重启那个会话前请先删掉它。
 
 **注意**：你的提示和 Claude 的回复会发给你配置的翻译服务商。代码块不翻译。"Ran a command" 这类计数行是 Claude Code 自己生成的，没法翻译；所以凡是含有带说明步骤的折叠组，都会自动展开，让每一步显示自己的中英对照标签。
