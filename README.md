@@ -30,16 +30,18 @@ Answer `y` to add the marketplace, then pick a scope. *User* makes it work in ev
 claude plugin install translate-bridge --marketplace xiaobaaaa/translate-bridge
 ```
 
+Options can be set in the same line, for example `--config language=Japanese`.
+
 ### Or let Claude install it for you
 
 Copy this into a Claude Code session:
 
 ```text
-Install the Claude Code mod "translate-bridge" from the GitHub marketplace xiaobaaaa/translate-bridge
-(run: claude plugin install translate-bridge --marketplace xiaobaaaa/translate-bridge).
-Then help me set it up: ask me which language I write in and which translation provider I use
-(DeepSeek, Qwen, Zhipu GLM, OpenAI, OpenRouter or a local Ollama), and set the plugin options
-"language", "baseUrl" and "model" to match. Do not ask me to paste my API key into the chat:
+Install the Claude Code mod "translate-bridge" from https://github.com/xiaobaaaa/translate-bridge.
+First ask me which language I write in and which translation provider I use (DeepSeek, Qwen,
+Zhipu GLM, OpenAI, OpenRouter or a local Ollama). Then install it with the matching options, e.g.:
+claude plugin install translate-bridge --marketplace xiaobaaaa/translate-bridge --config language="Simplified Chinese" --config baseUrl=https://api.deepseek.com
+(add --config model=<model> for any provider other than DeepSeek). Do not ask me to paste my API key into the chat:
 tell me how to add it myself, either in the plugin's settings or as TRANSLATE_BRIDGE_API_KEY
 in the "env" block of ~/.claude/settings.json. Then tell me to start a new session and run
 /translate status to check it.
@@ -47,7 +49,7 @@ in the "env" block of ~/.claude/settings.json. Then tell me to start a new sessi
 
 ## Configure
 
-The install screen asks for these options. You can change them later in the plugin's settings.
+Set these at install time (the install screen, or `--config KEY=VALUE`), or change them later with `/plugin configure translate-bridge@translate-bridge` in a terminal session or in the plugin's settings.
 
 | Option | Default | What it is |
 |---|---|---|
