@@ -1,0 +1,43 @@
+{
+  "name": "translate-bridge",
+  "version": "1.0.0",
+  "description": "Write to Claude in your own language: prompts go to Claude in English, and replies and step labels are shown in your language beside the English. Uses any OpenAI-compatible API (DeepSeek by default).",
+  "author": { "name": "xiaobaaaa" },
+  "homepage": "https://github.com/xiaobaaaa/translate-bridge",
+  "license": "MIT",
+  "keywords": ["translation", "i18n", "chinese", "bilingual", "deepseek", "mod"],
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "language": {
+      "type": "string",
+      "title": "Your language",
+      "description": "The language you write in and want replies shown in, named in English: Simplified Chinese, Japanese, Korean, Spanish, ...",
+      "default": "Simplified Chinese"
+    },
+    "apiKey": {
+      "type": "string",
+      "title": "API key",
+      "description": "Key for the translation API. Left empty, the TRANSLATE_BRIDGE_API_KEY environment variable is used.",
+      "sensitive": true,
+      "required": false
+    },
+    "baseUrl": {
+      "type": "string",
+      "title": "API base URL",
+      "description": "Any OpenAI-compatible API; /chat/completions is appended.",
+      "default": "https://api.deepseek.com"
+    },
+    "model": {
+      "type": "string",
+      "title": "Model",
+      "description": "The model that translates. Left empty with DeepSeek, deepseek-flash is used.",
+      "default": ""
+    },
+    "extraBody": {
+      "type": "string",
+      "title": "Extra request fields (JSON)",
+      "description": "Optional JSON object merged into every request, such as {\"temperature\": 0}.",
+      "default": ""
+    }
+  }
+}

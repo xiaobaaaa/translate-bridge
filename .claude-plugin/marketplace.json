@@ -1,0 +1,14 @@
+{
+  "name": "translate-bridge",
+  "description": "translate-bridge: write to Claude in your own language and read its replies bilingually.",
+  "owner": {
+    "name": "xiaobaaaa"
+  },
+  "plugins": [
+    {
+      "name": "translate-bridge",
+      "source": "./",
+      "description": "Write to Claude in your own language; read replies bilingually."
+    }
+  ]
+}
