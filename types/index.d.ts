@@ -12,6 +12,8 @@ declare module 'claude-code' {
     'translate-bridge': {
       mode: Mode
       order: Order
+      // The provider picked with /translate provider; '' keeps the configured order.
+      provider: string
       // Translations of replies and step labels, by a hash of target language and source text.
       translated: StateFamily<Translation>
       // The text as typed for each English prompt sent, by a hash of the English.

@@ -59,6 +59,9 @@ Set these at install time (the install screen, or `--config KEY=VALUE`), or chan
 | `baseUrl` | `https://api.deepseek.com` | Base URL of any OpenAI-compatible API. `/chat/completions` is appended to it. |
 | `model` | *(empty → `deepseek-flash` on DeepSeek)* | The model that translates. Required for any provider other than DeepSeek. |
 | `extraBody` | *(empty)* | Optional JSON object merged into every request, for example `{"temperature": 0}`. |
+| `fallback` | *(empty)* | Providers to try, in order, when the one before fails, comma-separated: `deepseek`, `zhipu`, `qwen`, `openai`, `openrouter`, `ollama`. |
+| `models` | *(empty)* | A model for each named provider, such as `qwen=qwen-flash, ollama=qwen3:8b`. DeepSeek and Zhipu have defaults; the others need one. |
+| `deepseekApiKey`, `zhipuApiKey`, `qwenApiKey`, `openaiApiKey`, `openrouterApiKey` | *(empty)* | The key for that provider when it is a fallback or picked with `/translate provider`. Each is kept in secure storage. Left empty, the environment variable in the table below is used. |
 
 If you'd rather use an environment variable for the key, add it to `~/.claude/settings.json` and start a new session:
 
@@ -68,16 +71,26 @@ If you'd rather use an environment variable for the key, add it to `~/.claude/se
 
 ### Providers
 
-Any API that speaks OpenAI's `/chat/completions` works. Pick a small, fast model, because translation doesn't need a large one.
+Any API that speaks OpenAI's `/chat/completions` works. Pick a small, fast model, because translation doesn't need a large one. The providers below are also known by name, for `fallback` and `/translate provider`. When `baseUrl` is one of their addresses, the main provider takes that name, its default model, and (if `apiKey` is empty) its key.
 
-| Provider | `baseUrl` | Notes |
-|---|---|---|
-| DeepSeek | `https://api.deepseek.com` | Default. Tested. Thinking mode is switched off automatically for translation. |
-| Alibaba Cloud Model Studio (Qwen) | `https://dashscope.aliyuncs.com/compatible-mode/v1` | Untested; use a Qwen chat model. |
-| Zhipu (GLM) | `https://open.bigmodel.cn/api/paas/v4` | Untested; use a GLM chat model. |
-| OpenAI | `https://api.openai.com/v1` | Untested. |
-| OpenRouter | `https://openrouter.ai/api/v1` | Untested. |
-| Ollama (local, free) | `http://localhost:11434/v1` | Untested. Runs on your machine, so no text leaves it. |
+| Name | `baseUrl` | Default model | Key variable | Notes |
+|---|---|---|---|---|
+| `deepseek` | `https://api.deepseek.com` | `deepseek-flash` | `DEEPSEEK_API_KEY` | Default. Tested. Thinking mode is switched off automatically for translation. |
+| `zhipu` | `https://open.bigmodel.cn/api/paas/v4` | `glm-4-flash` | `ZHIPU_API_KEY` | `glm-4-flash` is free. Blocks it hands back untranslated are sent again one by one. |
+| `qwen` | `https://dashscope.aliyuncs.com/compatible-mode/v1` | *(set in `models`)* | `DASHSCOPE_API_KEY` | Untested; use a Qwen chat model. |
+| `openai` | `https://api.openai.com/v1` | *(set in `models`)* | `OPENAI_API_KEY` | Untested. |
+| `openrouter` | `https://openrouter.ai/api/v1` | *(set in `models`)* | `OPENROUTER_API_KEY` | Untested. |
+| `ollama` | `http://localhost:11434/v1` | *(set in `models`)* | *(none needed)* | Untested. Runs on your machine, so no text leaves it. |
+
+### Fallback providers
+
+Set `fallback` to have other providers take over when one fails (no key, a network error, an HTTP error, an empty answer). Each request tries them in order, and a notice appears only when all of them failed, saying what each one answered. For example, Zhipu first and DeepSeek when Zhipu fails:
+
+```bash
+claude plugin install translate-bridge --marketplace xiaobaaaa/translate-bridge --config baseUrl=https://open.bigmodel.cn/api/paas/v4 --config fallback=deepseek
+```
+
+Then give each provider its key: the main one in `apiKey` (or `TRANSLATE_BRIDGE_API_KEY`), DeepSeek in `deepseekApiKey` (or `DEEPSEEK_API_KEY`).
 
 Translation is cheap. On DeepSeek's October 2026 price list, translating a medium-length reply (about 700 tokens in and 700 out) costs well under one US cent.
 
@@ -90,7 +103,10 @@ Translation is cheap. On DeepSeek's October 2026 price list, translating a mediu
 | `/translate translation-first` | In bilingual mode, show the translation first and the original second. |
 | `/translate only` | Show only the version in your language. |
 | `/translate off` | Turn translation off. Prompts go to Claude as typed. |
-| `/translate status` | Show the mode, language, provider and whether a key is set. |
+| `/translate provider` | List the providers in the order they are tried, with each one's model and whether its key is set. |
+| `/translate provider <name>` | Try that provider first, such as `/translate provider deepseek`. It can be any named provider with a key, even one not in `fallback`. |
+| `/translate provider default` | Go back to the configured order. |
+| `/translate status` | Show the mode, language, providers and whether each has a key. |
 
 Your choices are remembered across sessions.
 

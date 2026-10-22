@@ -5,6 +5,8 @@ import type { Mode, Order, Translation } from '../types'
 
 const mode = atom({ plugin: 'translate-bridge', key: 'mode' } as const, 'bilingual')
 const order = atom({ plugin: 'translate-bridge', key: 'order' } as const, 'original-first')
+// The provider picked with /translate provider, tried first; '' keeps the configured order.
+const provider = atom({ plugin: 'translate-bridge', key: 'provider' } as const, '')
 const translatedRef = { plugin: 'translate-bridge', key: 'translated' } as const
 const originalRef = { plugin: 'translate-bridge', key: 'original' } as const
 const englishRef = { plugin: 'translate-bridge', key: 'english' } as const
@@ -22,25 +24,54 @@ const SETTLE_MS = 1500
 
 const DEFAULT_LANGUAGE = 'Simplified Chinese'
 const DEFAULT_BASE_URL = 'https://api.deepseek.com'
-const DEFAULT_DEEPSEEK_MODEL = 'deepseek-flash'
+
+// Providers known by name: where they are, a model to use when none is set, where their key
+// is looked up, and fields every request to them carries.
+type Preset = { baseUrl: string; model: string; keyEnv?: string; body: Record<string, unknown> }
+const PRESETS: Record<string, Preset> = {
+  // DeepSeek thinks by default; translation does not need it, and it costs time and money.
+  deepseek: {
+    baseUrl: 'https://api.deepseek.com',
+    model: 'deepseek-flash',
+    keyEnv: 'DEEPSEEK_API_KEY',
+    body: { thinking: { type: 'disabled' }, temperature: 0 },
+  },
+  zhipu: { baseUrl: 'https://open.bigmodel.cn/api/paas/v4', model: 'glm-4-flash', keyEnv: 'ZHIPU_API_KEY', body: { temperature: 0 } },
+  qwen: { baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1', model: '', keyEnv: 'DASHSCOPE_API_KEY', body: {} },
+  openai: { baseUrl: 'https://api.openai.com/v1', model: '', keyEnv: 'OPENAI_API_KEY', body: {} },
+  openrouter: { baseUrl: 'https://openrouter.ai/api/v1', model: '', keyEnv: 'OPENROUTER_API_KEY', body: {} },
+  // A local Ollama needs no key.
+  ollama: { baseUrl: 'http://localhost:11434/v1', model: '', body: {} },
+}
+const PRESET_NAMES = Object.keys(PRESETS)
+// The main provider's name when its address is none of the known ones.
+const CUSTOM = 'custom'
 
 type Settings = {
   language: string
+  extraBody: Record<string, unknown>
+}
+
+type Provider = {
+  name: string
+  // the one set by baseUrl, model and apiKey
+  main: boolean
   baseUrl: string
   model: string
-  extraBody: Record<string, unknown>
+  body: Record<string, unknown>
+  // where to set the key, for the message when it is missing
+  keyHint: string
 }
 
 function text(value: unknown): string {
   return typeof value === 'string' ? value.trim() : ''
 }
 
-function isDeepSeek(baseUrl: string): boolean {
-  return /(^|\.|\/\/)deepseek\.com/.test(baseUrl)
+function hostOf(url: string): string {
+  return (/^[a-z]+:\/\/([^/]+)/i.exec(url)?.[1] ?? '').toLowerCase()
 }
 
 function settingsOf(options: PluginOptions): Settings {
-  const baseUrl = (text(options.baseUrl) || DEFAULT_BASE_URL).replace(/\/+$/, '')
   let extraBody: Record<string, unknown> = {}
   const raw = text(options.extraBody)
   if (raw) {
@@ -49,12 +80,66 @@ function settingsOf(options: PluginOptions): Settings {
       extraBody = parsed as Record<string, unknown>
     }
   }
-  return {
-    language: text(options.language) || DEFAULT_LANGUAGE,
-    baseUrl,
-    model: text(options.model) || (isDeepSeek(baseUrl) ? DEFAULT_DEEPSEEK_MODEL : ''),
-    extraBody,
+  return { language: text(options.language) || DEFAULT_LANGUAGE, extraBody }
+}
+
+// "qwen=qwen-flash, ollama=qwen3:8b" → { qwen: 'qwen-flash', ollama: 'qwen3:8b' }
+function modelsOf(options: PluginOptions): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const pair of text(options.models).split(',')) {
+    const at = pair.indexOf('=')
+    if (at > 0) out[pair.slice(0, at).trim().toLowerCase()] = pair.slice(at + 1).trim()
   }
+  return out
+}
+
+function namesOf(value: unknown): string[] {
+  return text(value)
+    .toLowerCase()
+    .split(/[\s,]+/)
+    .filter(Boolean)
+}
+
+// The main provider, from the baseUrl, model and apiKey options.
+function mainProvider(options: PluginOptions): Provider {
+  const baseUrl = (text(options.baseUrl) || DEFAULT_BASE_URL).replace(/\/+$/, '')
+  const name = PRESET_NAMES.find(one => hostOf(PRESETS[one]!.baseUrl) === hostOf(baseUrl)) ?? CUSTOM
+  const preset = PRESETS[name]
+  return {
+    name,
+    main: true,
+    baseUrl,
+    model: text(options.model) || modelsOf(options)[name] || preset?.model || '',
+    body: { ...preset?.body, ...settingsOf(options).extraBody },
+    keyHint: 'the plugin option apiKey or the TRANSLATE_BRIDGE_API_KEY environment variable',
+  }
+}
+
+function presetProvider(options: PluginOptions, name: string): Provider {
+  const preset = PRESETS[name]!
+  return {
+    name,
+    main: false,
+    baseUrl: preset.baseUrl,
+    model: modelsOf(options)[name] || preset.model,
+    body: { ...preset.body, ...settingsOf(options).extraBody },
+    keyHint: `the plugin option ${name}ApiKey${preset.keyEnv ? ` or the ${preset.keyEnv} environment variable` : ''}`,
+  }
+}
+
+// The providers in the order they are tried: the main one, then the fallback list, with the
+// one picked by /translate provider moved to the front.
+function providersOf(options: PluginOptions, preferred: string): Provider[] {
+  const all = [mainProvider(options)]
+  for (const name of namesOf(options.fallback)) {
+    if (PRESETS[name] && !all.some(one => one.name === name)) all.push(presetProvider(options, name))
+  }
+  if (preferred) {
+    const at = all.findIndex(one => one.name === preferred)
+    if (at > 0) all.unshift(...all.splice(at, 1))
+    else if (at < 0 && PRESETS[preferred]) all.unshift(presetProvider(options, preferred))
+  }
+  return all
 }
 
 function toEnglishPrompt(language: string): string {
@@ -208,43 +293,59 @@ function layout(source: string, translation: Translation, current: Mode, chosen:
 const pending = new Map<string, { text: string; cancel: () => void }>()
 const inflight = new Set<string>()
 
-async function apiKey($: EngineInterface, options: PluginOptions): Promise<string | undefined> {
-  const own = text(options.apiKey)
-  if (own) return own
-  const shared = text(await $.env.get('TRANSLATE_BRIDGE_API_KEY'))
-  if (shared) return shared
-  return isDeepSeek(settingsOf(options).baseUrl) ? text(await $.env.get('DEEPSEEK_API_KEY')) || undefined : undefined
+// Each name is spelled out, so the variables and options the mod reads can be listed.
+async function namedKey($: EngineInterface, options: PluginOptions, name: string): Promise<string> {
+  switch (name) {
+    case 'deepseek':
+      return text(options.deepseekApiKey) || text(await $.env.get('DEEPSEEK_API_KEY'))
+    case 'zhipu':
+      return text(options.zhipuApiKey) || text(await $.env.get('ZHIPU_API_KEY'))
+    case 'qwen':
+      return text(options.qwenApiKey) || text(await $.env.get('DASHSCOPE_API_KEY'))
+    case 'openai':
+      return text(options.openaiApiKey) || text(await $.env.get('OPENAI_API_KEY'))
+    case 'openrouter':
+      return text(options.openrouterApiKey) || text(await $.env.get('OPENROUTER_API_KEY'))
+    case 'ollama':
+      // a local Ollama takes any key
+      return 'ollama'
+    default:
+      return ''
+  }
 }
 
-async function complete(
+async function keyOf($: EngineInterface, options: PluginOptions, provider: Provider): Promise<string | undefined> {
+  if (provider.main) {
+    const own = text(options.apiKey) || text(await $.env.get('TRANSLATE_BRIDGE_API_KEY'))
+    if (own) return own
+  }
+  return (await namedKey($, options, provider.name)) || undefined
+}
+
+async function providers($: EngineInterface, options: PluginOptions): Promise<Provider[]> {
+  return providersOf(options, await read($, provider))
+}
+
+async function ask(
   $: EngineInterface,
-  options: PluginOptions,
+  one: Provider,
+  key: string,
   system: string,
   input: string,
   asJson: boolean,
 ): Promise<string> {
-  const settings = settingsOf(options)
-  const key = await apiKey($, options)
-  if (!key) {
-    throw new Error('no API key: set the plugin option apiKey or the TRANSLATE_BRIDGE_API_KEY environment variable')
-  }
-  if (!settings.model) {
-    throw new Error('no model: set the plugin option model')
-  }
-  const res = await $.http.fetch(`${settings.baseUrl}/chat/completions`, {
+  const res = await $.http.fetch(`${one.baseUrl}/chat/completions`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', authorization: `Bearer ${key}` },
     body: JSON.stringify({
-      model: settings.model,
+      model: one.model,
       stream: false,
       messages: [
         { role: 'system', content: system },
         { role: 'user', content: input },
       ],
       ...(asJson ? { response_format: { type: 'json_object' } } : {}),
-      // DeepSeek thinks by default; translation does not need it, and it costs time and money.
-      ...(isDeepSeek(settings.baseUrl) ? { thinking: { type: 'disabled' }, temperature: 0 } : {}),
-      ...settings.extraBody,
+      ...one.body,
     }),
   })
   if (!res.ok) {
@@ -256,6 +357,36 @@ async function complete(
     throw new Error('the translation API returned an empty answer')
   }
   return out
+}
+
+// Ask each provider in turn until one answers; when none does, say what each one said.
+async function complete(
+  $: EngineInterface,
+  options: PluginOptions,
+  system: string,
+  input: string,
+  asJson: boolean,
+): Promise<string> {
+  const all = await providers($, options)
+  const errors: string[] = []
+  for (const one of all) {
+    const key = await keyOf($, options, one)
+    const problem = !key
+      ? `no API key: set ${one.keyHint}`
+      : !one.model
+        ? `no model: set the plugin option ${one.main ? 'model' : `models (${one.name}=<model>)`}`
+        : ''
+    if (problem) {
+      errors.push(all.length > 1 ? `${one.name}: ${problem}` : problem)
+      continue
+    }
+    try {
+      return await ask($, one, key!, system, input, asJson)
+    } catch (error) {
+      errors.push(all.length > 1 ? `${one.name}: ${describe(error)}` : describe(error))
+    }
+  }
+  throw new Error(errors.join('; '))
 }
 
 async function translateBlocks(
@@ -326,13 +457,25 @@ async function runTranslation(
   }
 }
 
+// A block that came back exactly as it was sent, though it has prose to translate.
+function untranslated(source: string, out: string): boolean {
+  return out.trim() === source.trim() && isMostlyEnglish(source) !== undefined
+}
+
 function translateReply($: EngineInterface, options: PluginOptions, id: string, source: string, target: string) {
   return runTranslation($, id, async () => {
     const blocks = splitBlocks(source).filter(needsTranslation).map(block => block.text)
     const translated = await translateBlocks($, options, blocks, target)
-    return translated
-      ? { blocks: translated }
-      : { whole: await complete($, options, wholePrompt(target), source, false) }
+    if (!translated) return { whole: await complete($, options, wholePrompt(target), source, false) }
+    // Some models (glm-4-flash) hand blocks back as they were in JSON mode; those go again, one by one.
+    const fixed = await Promise.all(
+      translated.map((out, i) =>
+        untranslated(blocks[i] ?? '', out)
+          ? complete($, options, wholePrompt(target), blocks[i] ?? '', false).catch(() => out)
+          : out,
+      ),
+    )
+    return { blocks: fixed }
   })
 }
 
@@ -386,6 +529,36 @@ async function shownLabel(
   return undefined
 }
 
+const USAGE =
+  'Usage: /translate on (bilingual) | only (translation only) | off | ' +
+  'original-first | translation-first | provider [name | default] | status'
+
+// "zhipu: glm-4-flash at https://… (API key set)"
+async function describeProvider($: EngineInterface, options: PluginOptions, one: Provider): Promise<string> {
+  const key = (await keyOf($, options, one)) ? 'API key set' : 'no API key'
+  return `${one.name}: ${one.model || '(no model)'} at ${one.baseUrl} (${key})`
+}
+
+// Switch which provider goes first; '' or "default" goes back to the configured order.
+async function pickProvider($: EngineInterface, options: PluginOptions, name: string): Promise<string | undefined> {
+  if (name === 'default') name = ''
+  const known = providersOf(options, '').map(one => one.name)
+  if (name && !known.includes(name) && !PRESETS[name]) {
+    return `translate-bridge: no provider "${name}". Choose from ${[...new Set([...known, ...PRESET_NAMES])].join(', ')}, or default.`
+  }
+  await update($, provider, () => name)
+  await $.store.set('provider', name)
+  return undefined
+}
+
+async function status($: EngineInterface, options: PluginOptions): Promise<string> {
+  const now = await read($, mode)
+  const all = await providers($, options)
+  const lines = await Promise.all(all.map(one => describeProvider($, options, one)))
+  const head = `translate-bridge: ${MODE_LABEL[now]}${now === 'bilingual' ? ` (${await read($, order)})` : ''}; ${settingsOf(options).language} ⇄ English via`
+  return all.length === 1 ? `${head} ${lines[0]}` : `${head}, in this order:\n${lines.map((line, i) => `${i + 1}. ${line}`).join('\n')}`
+}
+
 export const register: Register = (on, options) => {
   on('session.start', async ($, e, next) => {
     const saved = await $.store.get('mode')
@@ -396,16 +569,21 @@ export const register: Register = (on, options) => {
     if (ORDERS.includes(savedOrder as Order)) {
       await update($, order, () => savedOrder as Order)
     }
+    const savedProvider = await $.store.get('provider')
+    if (typeof savedProvider === 'string') {
+      await update($, provider, () => savedProvider)
+    }
     await $.command.register({
       name: 'translate',
-      description: 'Translation: /translate on | only | off | original-first | translation-first | status',
-      argumentHint: 'on | only | off | original-first | translation-first | status',
+      description: 'Translation: /translate on | only | off | original-first | translation-first | provider | status',
+      argumentHint: 'on | only | off | original-first | translation-first | provider [name] | status',
     })
     return next(e)
   })
 
   on('command.run', { command: 'translate' }, async ($, e) => {
     const arg = e.args.trim().toLowerCase()
+    const [word = '', ...rest] = arg.split(/\s+/)
     const wanted: Mode | undefined =
       arg === 'only' ? 'only' : arg === 'off' ? 'off' : arg === 'on' || arg === 'bilingual' ? 'bilingual' : undefined
     const wantedOrder: Order | undefined = ORDERS.find(one => one === arg)
@@ -415,19 +593,16 @@ export const register: Register = (on, options) => {
     } else if (wantedOrder) {
       await update($, order, () => wantedOrder)
       await $.store.set('order', wantedOrder)
-    } else if (arg && arg !== 'status') {
-      return {
-        text:
-          'Usage: /translate on (bilingual) | only (translation only) | off | ' +
-          'original-first | translation-first | status',
+    } else if (word === 'provider' || word === 'providers') {
+      const name = rest.join(' ')
+      if (name) {
+        const problem = await pickProvider($, options, name)
+        if (problem) return { text: problem }
       }
+    } else if (arg && arg !== 'status') {
+      return { text: USAGE }
     }
-    const now = await read($, mode)
-    const settings = settingsOf(options)
-    const key = (await apiKey($, options)) ? 'API key set' : 'no API key'
-    return {
-      text: `translate-bridge: ${MODE_LABEL[now]}${now === 'bilingual' ? ` (${await read($, order)})` : ''}; ${settings.language} ⇄ English via ${settings.model || '(no model)'} at ${settings.baseUrl}; ${key}`,
-    }
+    return { text: await status($, options) }
   })
 
   on('prompt.submit', async ($, e, next) => {

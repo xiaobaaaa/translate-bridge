@@ -1,7 +1,7 @@
 {
   "name": "translate-bridge",
-  "version": "1.1.0",
-  "description": "Write to Claude in your own language: prompts go to Claude in English, and replies and step labels are shown in your language beside the English. Uses any OpenAI-compatible API (DeepSeek by default).",
+  "version": "1.2.0",
+  "description": "Write to Claude in your own language: prompts go to Claude in English, and replies and step labels are shown in your language beside the English. Uses any OpenAI-compatible API (DeepSeek by default), with fallback providers.",
   "author": {
     "name": "xiaobaaaa"
   },
@@ -47,6 +47,53 @@
       "title": "Extra request fields (JSON)",
       "description": "Optional JSON object merged into every request, such as {\"temperature\": 0}.",
       "default": ""
+    },
+    "fallback": {
+      "type": "string",
+      "title": "Fallback providers",
+      "description": "Providers tried in order when the one before fails, comma-separated: deepseek, zhipu, qwen, openai, openrouter, ollama.",
+      "default": ""
+    },
+    "models": {
+      "type": "string",
+      "title": "Model per provider",
+      "description": "Models for named providers, such as qwen=qwen-flash, ollama=qwen3:8b. DeepSeek and Zhipu have defaults; the others need one.",
+      "default": ""
+    },
+    "deepseekApiKey": {
+      "type": "string",
+      "title": "DeepSeek API key",
+      "description": "Key used when deepseek is a fallback or picked with /translate provider. Left empty, the DEEPSEEK_API_KEY environment variable is used.",
+      "sensitive": true,
+      "required": false
+    },
+    "zhipuApiKey": {
+      "type": "string",
+      "title": "Zhipu (GLM) API key",
+      "description": "Key used when zhipu is a fallback or picked with /translate provider. Left empty, the ZHIPU_API_KEY environment variable is used.",
+      "sensitive": true,
+      "required": false
+    },
+    "qwenApiKey": {
+      "type": "string",
+      "title": "Qwen (Alibaba Cloud Model Studio) API key",
+      "description": "Key used when qwen is a fallback or picked with /translate provider. Left empty, the DASHSCOPE_API_KEY environment variable is used.",
+      "sensitive": true,
+      "required": false
+    },
+    "openaiApiKey": {
+      "type": "string",
+      "title": "OpenAI API key",
+      "description": "Key used when openai is a fallback or picked with /translate provider. Left empty, the OPENAI_API_KEY environment variable is used.",
+      "sensitive": true,
+      "required": false
+    },
+    "openrouterApiKey": {
+      "type": "string",
+      "title": "OpenRouter API key",
+      "description": "Key used when openrouter is a fallback or picked with /translate provider. Left empty, the OPENROUTER_API_KEY environment variable is used.",
+      "sensitive": true,
+      "required": false
     }
   }
 }

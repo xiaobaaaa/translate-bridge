@@ -3,16 +3,21 @@ import type { On, RenderElement } from 'claude-code'
 
 const typed = (text: string) => ({ text, wait: false, origin: { kind: 'composer' as const } })
 
-type Request = { system: string; input: string; json: boolean; body: Record<string, unknown> }
+type Request = { url: string; key?: string; system: string; input: string; json: boolean; body: Record<string, unknown> }
 
 // A fake OpenAI-compatible API. Block requests get each block back as "ZH(<block>)";
 // plain requests get a fixed English or Chinese line.
-function fakeApi(on: On, seen: Request[], options: { breakBlocks?: boolean; failFirst?: number } = {}) {
+function fakeApi(
+  on: On,
+  seen: Request[],
+  options: { breakBlocks?: boolean; echoBlocks?: boolean; failFirst?: number; failHosts?: string[] } = {},
+) {
   let failures = options.failFirst ?? 0
   on('http.fetch', ($, e) => {
-    if (failures > 0) {
-      failures--
-      seen.push({ system: 'FAILED', input: '', json: false, body: {} })
+    const url = String(e.url)
+    if (failures > 0 || options.failHosts?.some(host => url.includes(host))) {
+      if (failures > 0) failures--
+      seen.push({ url, system: 'FAILED', input: '', json: false, body: {} })
       return { value: { status: 503, ok: false, headers: {}, text: 'busy' } }
     }
     const body = JSON.parse(e.init?.body ?? '{}') as {
@@ -21,11 +26,16 @@ function fakeApi(on: On, seen: Request[], options: { breakBlocks?: boolean; fail
     } & Record<string, unknown>
     const system = body.messages[0]?.content ?? ''
     const input = body.messages[1]?.content ?? ''
-    seen.push({ system, input, json: body.response_format !== undefined, body })
+    const key = (e.init?.headers as Record<string, string> | undefined)?.authorization
+    seen.push({ url, key, system, input, json: body.response_format !== undefined, body })
     let content: string
     if (body.response_format !== undefined) {
       const blocks = JSON.parse(input) as string[]
-      const out = options.breakBlocks ? blocks.slice(1) : blocks.map(block => `ZH(${block})`)
+      const out = options.breakBlocks
+        ? blocks.slice(1)
+        : options.echoBlocks
+          ? blocks
+          : blocks.map(block => `ZH(${block})`)
       content = JSON.stringify({ blocks: out })
     } else {
       content = /[一-鿿]/.test(input) ? 'Please list the files.' : '这里是文件列表。'
@@ -185,6 +195,28 @@ test('when the provider loses the blocks, the whole reply is translated instead'
   const shown = await drawnText(ui)
   expect(shown).toContain('这里是文件列表。')
   expect(shown).toContain('---')
+})
+
+test('blocks the provider hands back untranslated are translated again one by one', async ($, on) => {
+  const seen: Request[] = []
+  const clock = mock.clock(on)
+  mock.env(on, KEY)
+  fakeApi(on, seen, { echoBlocks: true })
+  drawAs(on, 'AssistantMessage')
+
+  const ui = await $.ui.mount({
+    plugin: 'translate-bridge',
+    surface: 'desktop',
+    component: 'AssistantMessage',
+    props: { text: REPLY, isFirstOfReply: true },
+  })
+  await clock.advance(2000)
+  // one block request, then one plain request for each of the three prose blocks
+  expect(seen).toHaveLength(4)
+  expect(seen.slice(1).every(request => !request.json)).toBe(true)
+  const shown = await drawnText(ui)
+  expect(shown).toContain('> 这里是文件列表。')
+  expect(shown).not.toContain('---')
 })
 
 test('English prose naming a few Chinese things is still English; a Chinese reply gets English under it', async ($, on) => {
@@ -397,4 +429,104 @@ test('/translate translation-first puts the translation first everywhere', async
   await clock.advance(2000)
   expect(await drawnText(reply)).toContain('ZH(Here are the files in the folder you asked about.)\\n\\n> Here are the files')
   expect(await drawnText(label)).toContain('这里是文件列表。 / List files in current directory')
+})
+
+const ZHIPU = { baseUrl: 'https://open.bigmodel.cn/api/paas/v4', fallback: 'deepseek' }
+const BOTH_KEYS = { TRANSLATE_BRIDGE_API_KEY: 'sk-zhipu', DEEPSEEK_API_KEY: 'sk-deepseek' }
+
+function run(command: { run: (input: never) => Promise<unknown> }, args: string) {
+  return command.run({
+    command: 'translate',
+    args,
+    origin: { kind: 'composer' },
+    presentation: { isFullscreen: false, columns: 100 },
+  } as never)
+}
+
+test('when the main provider fails, the fallback answers', { options: ZHIPU }, async ($, on) => {
+  const seen: Request[] = []
+  mock.env(on, BOTH_KEYS)
+  fakeApi(on, seen, { failHosts: ['bigmodel.cn'] })
+  on('prompt.submit', ($, e) => ({ text: e.text }))
+
+  expect(await $.prompt.submit(typed('请列出文件'))).toMatchObject({ text: 'Please list the files.' })
+  expect(seen.map(request => request.url)).toEqual([
+    'https://open.bigmodel.cn/api/paas/v4/chat/completions',
+    'https://api.deepseek.com/chat/completions',
+  ])
+  // Zhipu has its own defaults; DeepSeek still gets thinking off and its own key
+  expect(seen[1]?.body.model).toBe('deepseek-flash')
+  expect(seen[1]?.body.thinking).toEqual({ type: 'disabled' })
+})
+
+test('the main provider uses its own key and default model', { options: ZHIPU }, async ($, on) => {
+  const seen: Request[] = []
+  mock.env(on, BOTH_KEYS)
+  fakeApi(on, seen)
+  on('prompt.submit', ($, e) => ({ text: e.text }))
+
+  await $.prompt.submit(typed('请列出文件'))
+  expect(seen).toHaveLength(1)
+  expect(seen[0]?.body.model).toBe('glm-4-flash')
+  expect(seen[0]?.key).toBe('Bearer sk-zhipu')
+})
+
+test('when every provider fails, the notice names each one', { options: ZHIPU }, async ($, on) => {
+  const toasts: string[] = []
+  mock.env(on, BOTH_KEYS)
+  fakeApi(on, [], { failHosts: ['bigmodel.cn', 'deepseek.com'] })
+  on('ui.toast', ($, e) => {
+    toasts.push(String(e.text))
+    return { value: undefined }
+  })
+  on('prompt.submit', ($, e) => ({ text: e.text }))
+
+  expect(await $.prompt.submit(typed('请列出文件'))).toMatchObject({ text: '请列出文件' })
+  expect(toasts.join(' ')).toContain('zhipu: the translation API answered HTTP 503')
+  expect(toasts.join(' ')).toContain('deepseek: the translation API answered HTTP 503')
+})
+
+test('a fallback with no key is skipped, and the notice says where to set it', { options: { ...ZHIPU, fallback: 'qwen' } }, async ($, on) => {
+  const toasts: string[] = []
+  mock.env(on, { TRANSLATE_BRIDGE_API_KEY: 'sk-zhipu' })
+  fakeApi(on, [], { failHosts: ['bigmodel.cn'] })
+  on('ui.toast', ($, e) => {
+    toasts.push(String(e.text))
+    return { value: undefined }
+  })
+  on('prompt.submit', ($, e) => ({ text: e.text }))
+
+  await $.prompt.submit(typed('请列出文件'))
+  expect(toasts.join(' ')).toContain('qwen: no API key: set the plugin option qwenApiKey or the DASHSCOPE_API_KEY environment variable')
+})
+
+test('/translate provider deepseek puts DeepSeek first; default puts the order back', { options: ZHIPU }, async ($, on) => {
+  const seen: Request[] = []
+  mock.env(on, BOTH_KEYS)
+  mock.store(on)
+  fakeApi(on, seen)
+  on('prompt.submit', ($, e) => ({ text: e.text }))
+
+  const answer = JSON.stringify(await run($.command, 'provider deepseek'))
+  expect(answer).toContain('1. deepseek: deepseek-flash at https://api.deepseek.com (API key set)')
+  expect(answer).toContain('2. zhipu: glm-4-flash at https://open.bigmodel.cn/api/paas/v4 (API key set)')
+  await $.prompt.submit(typed('请列出文件'))
+  expect(seen[0]?.url).toBe('https://api.deepseek.com/chat/completions')
+
+  expect(JSON.stringify(await run($.command, 'provider default'))).toContain('1. zhipu')
+})
+
+test('/translate provider with an unknown name lists the choices', { options: ZHIPU }, async ($, on) => {
+  mock.env(on, BOTH_KEYS)
+  mock.store(on)
+  const answer = JSON.stringify(await run($.command, 'provider nope'))
+  expect(answer).toContain('no provider \\"nope\\"')
+  expect(answer).toContain('zhipu, deepseek, qwen')
+})
+
+test('/translate status with one provider keeps to one line', async ($, on) => {
+  mock.env(on, KEY)
+  mock.store(on)
+  const answer = JSON.stringify(await run($.command, 'status'))
+  expect(answer).toContain('via deepseek: deepseek-flash at https://api.deepseek.com (API key set)')
 })
