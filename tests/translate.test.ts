@@ -141,7 +141,7 @@ const REPLY = [
   'This is the public list, so it does not prove that your account can call each model.',
 ].join('\n\n')
 
-test('a reply is shown paragraph by paragraph: translation, then the English as a quote; code once', async ($, on) => {
+test('a reply is shown paragraph by paragraph: the English as written, then the translation as a quote; code once', async ($, on) => {
   const seen: Request[] = []
   const clock = mock.clock(on)
   mock.env(on, KEY)
@@ -162,8 +162,8 @@ test('a reply is shown paragraph by paragraph: translation, then the English as 
 
   const drawn = JSON.parse(await drawnText(ui)) as { children: string[] }
   const shown = drawn.children.join('')
-  expect(shown).toContain('ZH(I checked the two endpoints and both of them answered.)\n\n> I checked the two endpoints')
-  expect(shown).toContain('ZH(- **Free:** big-pickle, beam-free)\n\n> - **Free:** big-pickle, beam-free')
+  expect(shown).toContain('I checked the two endpoints and both of them answered.\n\n> ZH(I checked the two endpoints')
+  expect(shown).toContain('- **Free:** big-pickle, beam-free\n\n> ZH(- **Free:** big-pickle, beam-free)')
   expect(shown.split('curl https://example.com/models')).toHaveLength(2)
 })
 
@@ -256,7 +256,7 @@ test('a step label is shown bilingually', async ($, on) => {
   })
   await clock.advance(2000)
   expect(seen).toHaveLength(1)
-  expect(await drawnText(ui)).toContain('这里是文件列表。 / List files in current directory')
+  expect(await drawnText(ui)).toContain('List files in current directory / 这里是文件列表。')
 })
 
 test('a folded group with labelled steps is unfolded, so each step shows its own label', async ($, on) => {
@@ -319,8 +319,8 @@ test('each step in an unfolded group is shown bilingually', async ($, on) => {
   await clock.advance(2000)
   expect(seen).toHaveLength(2)
   const drawn = await drawnText(ui)
-  expect(drawn).toContain('这里是文件列表。 / Show working tree status')
-  expect(drawn).toContain('这里是文件列表。 / Install package dependencies')
+  expect(drawn).toContain('Show working tree status / 这里是文件列表。')
+  expect(drawn).toContain('Install package dependencies / 这里是文件列表。')
 })
 
 test('a reply the app reports as off screen is still translated', async ($, on) => {
@@ -363,4 +363,38 @@ test('a failed translation is tried again, and is not reported while a retry is 
   await clock.advance(6000)
   expect(await drawnText(ui)).toContain('ZH(Here are the files in the folder you asked about.)')
   expect(toasts).toHaveLength(0)
+})
+
+test('/translate translation-first puts the translation first everywhere', async ($, on) => {
+  const seen: Request[] = []
+  const clock = mock.clock(on)
+  mock.env(on, KEY)
+  mock.store(on)
+  fakeApi(on, seen)
+  drawAs(on, 'AssistantMessage')
+  drawLabels(on)
+
+  const answer = await $.command.run({
+    command: 'translate',
+    args: 'translation-first',
+    origin: { kind: 'composer' },
+    presentation: { isFullscreen: false, columns: 100 },
+  })
+  expect(JSON.stringify(answer)).toContain('translation-first')
+
+  const reply = await $.ui.mount({
+    plugin: 'translate-bridge',
+    surface: 'desktop',
+    component: 'AssistantMessage',
+    props: { text: 'Here are the files in the folder you asked about.', isFirstOfReply: true },
+  })
+  const label = await $.ui.mount({
+    plugin: 'translate-bridge',
+    surface: 'desktop',
+    component: 'ToolUse',
+    props: bash('o1', 'List files in current directory'),
+  })
+  await clock.advance(2000)
+  expect(await drawnText(reply)).toContain('ZH(Here are the files in the folder you asked about.)\\n\\n> Here are the files')
+  expect(await drawnText(label)).toContain('这里是文件列表。 / List files in current directory')
 })

@@ -1,12 +1,13 @@
 # translate-bridge
 
-**Write to Claude Code in your own language. Claude works in English. You read the replies in both.**
+**Write to Claude Code in your own language. Claude works in English. You read everything in both.**
 
 translate-bridge is a Claude Code mod. It hooks into Claude Code's prompt and transcript, so you don't run a separate app:
 
 - **Your prompt** is translated into English before Claude sees it. The transcript still shows what you typed, with the English that was sent under it (`↳ …`).
-- **Claude's replies** are shown paragraph by paragraph: first your language, then Claude's original English as a quote under it. Code blocks are shown once and never translated.
-- **The grey step labels** (for example "List files in current directory") are shown as `your language / English`.
+- **Claude's replies** are shown paragraph by paragraph: each paragraph as Claude wrote it, then its translation as a quote under it. Code blocks are shown once and never translated.
+- **The grey step labels** (for example "List files in current directory") are shown as `English / your language`.
+- Prefer the translation on top? `/translate translation-first` swaps the order everywhere.
 
 The translation is done by any **OpenAI-compatible API** you choose, with **your own API key**. DeepSeek is the default, and the target language is set in the plugin options.
 
@@ -84,12 +85,14 @@ Translation is cheap. On DeepSeek's October 2026 price list, translating a mediu
 
 | Command | What it does |
 |---|---|
-| `/translate on` | Bilingual (the default): your language first, English under it. |
-| `/translate only` | Show the translation only. |
+| `/translate on` | Bilingual (the default). |
+| `/translate original-first` | In bilingual mode, show what was written first and its translation second (the default). |
+| `/translate translation-first` | In bilingual mode, show the translation first and the original second. |
+| `/translate only` | Show only the version in your language. |
 | `/translate off` | Turn translation off. Prompts go to Claude as typed. |
 | `/translate status` | Show the mode, language, provider and whether a key is set. |
 
-Your choice is remembered across sessions.
+Your choices are remembered across sessions.
 
 ### What happens, and when
 
@@ -141,13 +144,14 @@ To run your working copy instead of the installed version, start Claude Code wit
 **用中文给 Claude Code 写提示，Claude 在英文里工作，回复按段落中英对照显示。**
 
 - **你的提示**：先译成英文再交给 Claude；对话里照样显示你写的中文，下面附上发出去的英文。
-- **Claude 的回复**：每段先显示中文，下面用引用块附上英文原文；代码块只显示一次，不翻译。
-- **灰色步骤标签**：显示成「中文 / English」。
+- **Claude 的回复**：每段先显示英文原文，下面用引用块附上中文译文；代码块只显示一次，不翻译。
+- **灰色步骤标签**：显示成「English / 中文」。
+- 想让译文在上？`/translate translation-first` 会把所有地方的顺序换过来，`/translate original-first` 换回原文在上。
 
 翻译用你自己的 API key，接任何 OpenAI 兼容接口，默认 DeepSeek。
 
 **安装**：在桌面 App 里点输入框旁的 **+** → **Plugins** → **Add marketplace**，填 `xiaobaaaa/translate-bridge` → **Add plugin**。在终端会话里，也可以用上面英文部分的 `/plugin install` 命令。安装时填 API key，也可以在 `~/.claude/settings.json` 的 `env` 里设 `TRANSLATE_BRIDGE_API_KEY`。然后新开会话，运行 `/translate status` 检查。
 
-**命令**：`/translate on`（中英对照，默认）、`/translate only`（只显示中文）、`/translate off`、`/translate status`。
+**命令**：`/translate on`（中英对照，默认）、`/translate original-first`（原文在上，默认）、`/translate translation-first`（译文在上）、`/translate only`（只显示中文）、`/translate off`、`/translate status`。
 
 **注意**：你的提示和 Claude 的回复会发给你配置的翻译服务商。代码块不翻译。"Ran a command" 这类计数行是 Claude Code 自己生成的，没法翻译；所以凡是含有带说明步骤的折叠组，都会自动展开，让每一步显示自己的中英对照标签。

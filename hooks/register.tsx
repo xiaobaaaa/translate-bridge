@@ -1,14 +1,16 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, PluginOptions, Register } from 'claude-code'
 
-import type { Mode, Translation } from '../types'
+import type { Mode, Order, Translation } from '../types'
 
 const mode = atom({ plugin: 'translate-bridge', key: 'mode' } as const, 'bilingual')
+const order = atom({ plugin: 'translate-bridge', key: 'order' } as const, 'original-first')
 const translatedRef = { plugin: 'translate-bridge', key: 'translated' } as const
 const originalRef = { plugin: 'translate-bridge', key: 'original' } as const
 const englishRef = { plugin: 'translate-bridge', key: 'english' } as const
 
 const MODES: readonly Mode[] = ['off', 'only', 'bilingual']
+const ORDERS: readonly Order[] = ['original-first', 'translation-first']
 const MODE_LABEL: Record<Mode, string> = {
   off: 'off',
   only: 'translation only',
@@ -173,11 +175,24 @@ function quote(value: string): string {
     .join('\n')
 }
 
-// Native text first, the English under it as a quote, paragraph by paragraph.
-function layout(source: string, translation: Translation, current: Mode, sourceIsEnglish: boolean): string {
+// The original (what was written) and its translation, in the chosen order, put together by
+// `join`; in 'only' mode just the one in the user's language.
+function pair(
+  original: string,
+  translation: string,
+  current: Mode,
+  chosen: Order,
+  originalIsEnglish: boolean,
+  join: (first: string, second: string) => string,
+): string {
+  if (current === 'only') return originalIsEnglish ? translation : original
+  return chosen === 'original-first' ? join(original, translation) : join(translation, original)
+}
+
+// A reply, paragraph by paragraph: the first version as written, the second as a quote under it.
+function layout(source: string, translation: Translation, current: Mode, chosen: Order, sourceIsEnglish: boolean): string {
   if (translation.whole !== undefined) {
-    const [native, english] = sourceIsEnglish ? [translation.whole, source] : [source, translation.whole]
-    return current === 'only' ? native : `${native}\n\n---\n\n${english}`
+    return pair(source, translation.whole, current, chosen, sourceIsEnglish, (a, b) => `${a}\n\n---\n\n${b}`)
   }
   const translated = translation.blocks ?? []
   let index = 0
@@ -185,8 +200,7 @@ function layout(source: string, translation: Translation, current: Mode, sourceI
     .map(block => {
       if (!needsTranslation(block)) return block.text
       const other = translated[index++] ?? block.text
-      const [native, english] = sourceIsEnglish ? [other, block.text] : [block.text, other]
-      return current === 'only' ? native : `${native}\n\n${quote(english)}`
+      return pair(block.text, other, current, chosen, sourceIsEnglish, (a, b) => `${a}\n\n${quote(b)}`)
     })
     .join('\n\n')
 }
@@ -366,8 +380,7 @@ async function shownLabel(
   const id = hash(`label:${target}:${label}`)
   const { value } = await $.state.get({ ...translatedRef, id })
   if (value?.whole !== undefined) {
-    const [native, en] = english ? [value.whole, label] : [label, value.whole]
-    return current === 'only' ? native : `${native} / ${en}`
+    return pair(label, value.whole, current, await read($, order), english, (a, b) => `${a} / ${b}`)
   }
   schedule($, slot, label, () => translateLabel($, options, id, label, target))
   return undefined
@@ -379,10 +392,14 @@ export const register: Register = (on, options) => {
     if (MODES.includes(saved as Mode)) {
       await update($, mode, () => saved as Mode)
     }
+    const savedOrder = await $.store.get('order')
+    if (ORDERS.includes(savedOrder as Order)) {
+      await update($, order, () => savedOrder as Order)
+    }
     await $.command.register({
       name: 'translate',
-      description: 'Translation: /translate on (bilingual) | only | off | status',
-      argumentHint: 'on | only | off | status',
+      description: 'Translation: /translate on | only | off | original-first | translation-first | status',
+      argumentHint: 'on | only | off | original-first | translation-first | status',
     })
     return next(e)
   })
@@ -391,17 +408,25 @@ export const register: Register = (on, options) => {
     const arg = e.args.trim().toLowerCase()
     const wanted: Mode | undefined =
       arg === 'only' ? 'only' : arg === 'off' ? 'off' : arg === 'on' || arg === 'bilingual' ? 'bilingual' : undefined
+    const wantedOrder: Order | undefined = ORDERS.find(one => one === arg)
     if (wanted) {
       await update($, mode, () => wanted)
       await $.store.set('mode', wanted)
+    } else if (wantedOrder) {
+      await update($, order, () => wantedOrder)
+      await $.store.set('order', wantedOrder)
     } else if (arg && arg !== 'status') {
-      return { text: 'Usage: /translate on (bilingual) | only (translation only) | off | status' }
+      return {
+        text:
+          'Usage: /translate on (bilingual) | only (translation only) | off | ' +
+          'original-first | translation-first | status',
+      }
     }
     const now = await read($, mode)
     const settings = settingsOf(options)
     const key = (await apiKey($, options)) ? 'API key set' : 'no API key'
     return {
-      text: `translate-bridge: ${MODE_LABEL[now]}; ${settings.language} ⇄ English via ${settings.model || '(no model)'} at ${settings.baseUrl}; ${key}`,
+      text: `translate-bridge: ${MODE_LABEL[now]}${now === 'bilingual' ? ` (${await read($, order)})` : ''}; ${settings.language} ⇄ English via ${settings.model || '(no model)'} at ${settings.baseUrl}; ${key}`,
     }
   })
 
@@ -433,10 +458,10 @@ export const register: Register = (on, options) => {
       $.state.get({ ...originalRef, id }),
       $.state.get({ ...englishRef, id }),
     ])
-    const native = original ?? (english ? e.props.text : undefined)
-    const en = original ? e.props.text : english
-    if (!native || !en) return next(e)
-    const shown = current === 'only' ? native : `${native}\n\n↳ ${en}`
+    const typedText = original ?? (english ? e.props.text : undefined)
+    const sent = original ? e.props.text : english
+    if (!typedText || !sent) return next(e)
+    const shown = pair(typedText, sent, current, await read($, order), false, (a, b) => `${a}\n\n↳ ${b}`)
     return next({ ...e, props: { ...e.props, text: shown } })
   })
 
@@ -450,7 +475,7 @@ export const register: Register = (on, options) => {
     const id = hash(`reply:${target}:${source}`)
     const { value } = await $.state.get({ ...translatedRef, id })
     if (value) {
-      return next({ ...e, props: { ...e.props, text: layout(source, value, current, english) } })
+      return next({ ...e, props: { ...e.props, text: layout(source, value, current, await read($, order), english) } })
     }
 
     // While a block streams its start stays the same: that and the message id find it again.
