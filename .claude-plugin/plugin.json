@@ -1,6 +1,6 @@
 {
   "name": "translate-bridge",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Write to Claude in your own language: prompts go to Claude in English, and replies and step labels are shown in your language beside the English. Uses any OpenAI-compatible API (DeepSeek by default).",
   "author": {
     "name": "xiaobaaaa"

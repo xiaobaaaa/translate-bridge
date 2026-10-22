@@ -94,8 +94,8 @@ Your choice is remembered across sessions.
 ### What happens, and when
 
 - Prompts that are already English are sent unchanged, with no API call. Slash commands are never translated.
-- A reply is translated about 1.5 s after it stops streaming, so you'll briefly see the English first. Replies that are scrolled out of view are translated when you scroll back to them.
-- If translation fails (no key, network error, provider error), your prompt is sent as typed and a notice says why. Nothing is ever dropped.
+- A reply is translated about 1.5 s after it stops streaming, so you'll briefly see the English first. At most 4 translation requests run at once.
+- If a prompt can't be translated (no key, network error, provider error), it is sent as typed and a notice says why. A reply or label that fails is retried twice, 5 s apart, before a notice is shown. Nothing is ever dropped.
 - Only what you **see** changes. Claude's stored conversation stays in English, so Claude's context is never mixed with translations.
 
 ### What isn't translated

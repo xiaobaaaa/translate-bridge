@@ -7,8 +7,14 @@ type Request = { system: string; input: string; json: boolean; body: Record<stri
 
 // A fake OpenAI-compatible API. Block requests get each block back as "ZH(<block>)";
 // plain requests get a fixed English or Chinese line.
-function fakeApi(on: On, seen: Request[], options: { breakBlocks?: boolean } = {}) {
+function fakeApi(on: On, seen: Request[], options: { breakBlocks?: boolean; failFirst?: number } = {}) {
+  let failures = options.failFirst ?? 0
   on('http.fetch', ($, e) => {
+    if (failures > 0) {
+      failures--
+      seen.push({ system: 'FAILED', input: '', json: false, body: {} })
+      return { value: { status: 503, ok: false, headers: {}, text: 'busy' } }
+    }
     const body = JSON.parse(e.init?.body ?? '{}') as {
       messages: { content: string }[]
       response_format?: unknown
@@ -315,4 +321,46 @@ test('each step in an unfolded group is shown bilingually', async ($, on) => {
   const drawn = await drawnText(ui)
   expect(drawn).toContain('这里是文件列表。 / Show working tree status')
   expect(drawn).toContain('这里是文件列表。 / Install package dependencies')
+})
+
+test('a reply the app reports as off screen is still translated', async ($, on) => {
+  const seen: Request[] = []
+  const clock = mock.clock(on)
+  mock.env(on, KEY)
+  fakeApi(on, seen)
+  drawAs(on, 'AssistantMessage')
+
+  const ui = await $.ui.mount({
+    plugin: 'translate-bridge',
+    surface: 'desktop',
+    component: 'AssistantMessage',
+    props: { text: 'Confirmed: every message reached me in English.', isFirstOfReply: true, onScreen: null },
+  })
+  await clock.advance(2000)
+  expect(await drawnText(ui)).toContain('ZH(Confirmed: every message reached me in English.)')
+})
+
+test('a failed translation is tried again, and is not reported while a retry is left', async ($, on) => {
+  const seen: Request[] = []
+  const toasts: string[] = []
+  const clock = mock.clock(on)
+  mock.env(on, KEY)
+  fakeApi(on, seen, { failFirst: 2 })
+  drawAs(on, 'AssistantMessage')
+  on('ui.toast', ($, e) => {
+    toasts.push(String(e.text))
+    return { value: undefined }
+  })
+
+  const ui = await $.ui.mount({
+    plugin: 'translate-bridge',
+    surface: 'desktop',
+    component: 'AssistantMessage',
+    props: { text: 'Here are the files in the folder you asked about.', isFirstOfReply: true },
+  })
+  await clock.advance(2000)
+  // first try: the block request fails, and so does the whole-text fallback
+  await clock.advance(6000)
+  expect(await drawnText(ui)).toContain('ZH(Here are the files in the folder you asked about.)')
+  expect(toasts).toHaveLength(0)
 })

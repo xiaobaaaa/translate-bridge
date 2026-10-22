@@ -267,34 +267,66 @@ function describe(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
-async function translateReply($: EngineInterface, options: PluginOptions, id: string, source: string, target: string) {
-  if (inflight.has(id)) return
-  inflight.add(id)
+// At most this many translation requests run at once; the rest wait their turn.
+const MAX_REQUESTS = 4
+// A failed translation is tried this many times in all, this long apart.
+const ATTEMPTS = 3
+const RETRY_MS = 5000
+
+let running = 0
+const waiting: (() => void)[] = []
+
+async function limited<T>(work: () => Promise<T>): Promise<T> {
+  if (running >= MAX_REQUESTS) {
+    await new Promise<void>(resolve => waiting.push(resolve))
+  }
+  running++
   try {
-    const blocks = splitBlocks(source).filter(needsTranslation).map(block => block.text)
-    const translated = await translateBlocks($, options, blocks, target)
-    const value: Translation = translated
-      ? { blocks: translated }
-      : { whole: await complete($, options, wholePrompt(target), source, false) }
-    await $.state.set({ ...translatedRef, id }, value)
-  } catch (error) {
-    $.ui.toast(`translate-bridge: ${describe(error)}`)
+    return await work()
   } finally {
-    inflight.delete(id)
+    running--
+    waiting.shift()?.()
   }
 }
 
-async function translateLabel($: EngineInterface, options: PluginOptions, id: string, label: string, target: string) {
+// Translate and store under `id`; on failure try again later, and say so only at the last try.
+async function runTranslation(
+  $: EngineInterface,
+  id: string,
+  work: () => Promise<Translation>,
+  attempt = 1,
+): Promise<void> {
   if (inflight.has(id)) return
   inflight.add(id)
+  let failed = false
   try {
-    const whole = await complete($, options, labelPrompt(target), label, false)
-    await $.state.set({ ...translatedRef, id }, { whole: whole.split('\n')[0] ?? whole })
+    await $.state.set({ ...translatedRef, id }, await limited(work))
   } catch (error) {
-    $.ui.toast(`translate-bridge: ${describe(error)}`)
+    failed = true
+    if (attempt >= ATTEMPTS) $.ui.toast(`translate-bridge: ${describe(error)}`)
   } finally {
     inflight.delete(id)
   }
+  if (failed && attempt < ATTEMPTS) {
+    $.clock.after(RETRY_MS, () => void runTranslation($, id, work, attempt + 1))
+  }
+}
+
+function translateReply($: EngineInterface, options: PluginOptions, id: string, source: string, target: string) {
+  return runTranslation($, id, async () => {
+    const blocks = splitBlocks(source).filter(needsTranslation).map(block => block.text)
+    const translated = await translateBlocks($, options, blocks, target)
+    return translated
+      ? { blocks: translated }
+      : { whole: await complete($, options, wholePrompt(target), source, false) }
+  })
+}
+
+function translateLabel($: EngineInterface, options: PluginOptions, id: string, label: string, target: string) {
+  return runTranslation($, id, async () => {
+    const whole = await complete($, options, labelPrompt(target), label, false)
+    return { whole: whole.split('\n')[0] ?? whole }
+  })
 }
 
 // Translate once the text at `slot` has stopped changing for SETTLE_MS.
@@ -327,7 +359,6 @@ async function shownLabel(
   current: Mode,
   slot: string,
   label: string,
-  canSchedule: boolean,
 ): Promise<string | undefined> {
   const english = isMostlyEnglish(label)
   if (english === undefined || (current === 'only' && !english)) return undefined
@@ -338,7 +369,7 @@ async function shownLabel(
     const [native, en] = english ? [value.whole, label] : [label, value.whole]
     return current === 'only' ? native : `${native} / ${en}`
   }
-  if (canSchedule) schedule($, slot, label, () => translateLabel($, options, id, label, target))
+  schedule($, slot, label, () => translateLabel($, options, id, label, target))
   return undefined
 }
 
@@ -422,9 +453,6 @@ export const register: Register = (on, options) => {
       return next({ ...e, props: { ...e.props, text: layout(source, value, current, english) } })
     }
 
-    // Leave messages scrolled out of view for when they come back into view.
-    if (e.props.onScreen === null) return next(e)
-
     // While a block streams its start stays the same: that and the message id find it again.
     const slot = `${e.requestId ?? ''}:${source.slice(0, 40)}`
     schedule($, slot, source, () => translateReply($, options, id, source, target))
@@ -437,7 +465,7 @@ export const register: Register = (on, options) => {
     const label = labelOf(e.props.tool, e.props.input)
     if (current === 'off' || !label) return next(e)
     const slot = `label:${e.props.tool_use_id}`
-    const shown = await shownLabel($, options, current, slot, label, e.props.onScreen !== null)
+    const shown = await shownLabel($, options, current, slot, label)
     if (!shown) return next(e)
     const input = { ...(e.props.input as Record<string, unknown>), [labelField(e.props.tool)]: shown }
     return next({ ...e, props: { ...e.props, input } })
@@ -458,7 +486,7 @@ export const register: Register = (on, options) => {
         const label = labelOf(call.tool, call.input)
         if (!label) return call
         const slot = `label:${call.tool_use_id ?? `${e.requestId}:${index}`}`
-        const shown = await shownLabel($, options, current, slot, label, e.props.onScreen !== null)
+        const shown = await shownLabel($, options, current, slot, label)
         if (!shown) return call
         changed = true
         return { ...call, input: { ...(call.input as Record<string, unknown>), [labelField(call.tool)]: shown } }
