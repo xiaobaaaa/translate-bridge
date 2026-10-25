@@ -293,6 +293,70 @@ function layout(source: string, translation: Translation, current: Mode, chosen:
 const pending = new Map<string, { text: string; cancel: () => void }>()
 const inflight = new Set<string>()
 
+// Translations are kept in $.store too, so they outlast a restart of the app ($.state is the
+// session's alone). The store holds 4 MiB of JSON in all: past this many characters of saved
+// text the oldest go first. Each is saved under t:<id>, o:<id> or e:<id>, listed in SAVED.
+const SAVED_LIMIT = 1_000_000
+const SAVED = 'saved'
+let saving: Promise<void> = Promise.resolve()
+
+function save($: EngineInterface, key: string, value: unknown): void {
+  saving = saving
+    .then(async () => {
+      const size = key.length + JSON.stringify(value).length
+      const listed = await $.store.get(SAVED)
+      const index = (Array.isArray(listed) ? listed : []).filter(
+        (one): one is [string, number] => Array.isArray(one) && one[0] !== key,
+      )
+      index.push([key, size])
+      let total = index.reduce((sum, [, n]) => sum + n, 0)
+      while (total > SAVED_LIMIT && index.length > 1) {
+        const [old, n] = index.shift()!
+        total -= n
+        await $.store.delete(old)
+      }
+      await $.store.set(key, value)
+      await $.store.set(SAVED, index)
+    })
+    .catch(() => {
+      // a translation that is not saved is made again after a restart
+    })
+}
+
+async function savedTranslation($: EngineInterface, id: string): Promise<Translation | undefined> {
+  const { value } = await $.state.get({ ...translatedRef, id })
+  if (value) return value
+  const saved = await $.store.get(`t:${id}`)
+  return typeof saved === 'object' && saved !== null ? (saved as Translation) : undefined
+}
+
+async function savedText($: EngineInterface, ref: 'original' | 'english', id: string): Promise<string | undefined> {
+  const { value } =
+    ref === 'original' ? await $.state.get({ ...originalRef, id }) : await $.state.get({ ...englishRef, id })
+  if (value) return value
+  const saved = await $.store.get(`${ref === 'original' ? 'o' : 'e'}:${id}`)
+  return typeof saved === 'string' ? saved : undefined
+}
+
+// A prompt and the English sent for it, both ways: a surface may hand the row either one.
+async function rememberPrompt($: EngineInterface, typedText: string, english: string): Promise<void> {
+  const englishId = hash(english.trim())
+  const typedId = hash(typedText.trim())
+  await $.state.set({ ...originalRef, id: englishId }, typedText)
+  await $.state.set({ ...englishRef, id: typedId }, english)
+  save($, `o:${englishId}`, typedText)
+  save($, `e:${typedId}`, english)
+}
+
+// The same reply has the same id, whether it is translated as it is written or as it is drawn.
+function replyId(target: string, source: string): string {
+  return hash(`reply:${target}:${source.trim()}`)
+}
+
+function labelId(target: string, label: string): string {
+  return hash(`label:${target}:${label.trim()}`)
+}
+
 // Each name is spelled out, so the variables and options the mod reads can be listed.
 async function namedKey($: EngineInterface, options: PluginOptions, name: string): Promise<string> {
   switch (name) {
@@ -445,7 +509,15 @@ async function runTranslation(
   inflight.add(id)
   let failed = false
   try {
-    await $.state.set({ ...translatedRef, id }, await limited(work))
+    // Done already: as it was written, or before a restart.
+    const done = await savedTranslation($, id)
+    if (done) {
+      await $.state.set({ ...translatedRef, id }, done)
+      return
+    }
+    const value = await limited(work)
+    await $.state.set({ ...translatedRef, id }, value)
+    save($, `t:${id}`, value)
   } catch (error) {
     failed = true
     if (attempt >= ATTEMPTS) $.ui.toast(`translate-bridge: ${describe(error)}`)
@@ -520,8 +592,8 @@ async function shownLabel(
   const english = isMostlyEnglish(label)
   if (english === undefined || (current === 'only' && !english)) return undefined
   const target = english ? settingsOf(options).language : 'English'
-  const id = hash(`label:${target}:${label}`)
-  const { value } = await $.state.get({ ...translatedRef, id })
+  const id = labelId(target, label)
+  const value = await savedTranslation($, id)
   if (value?.whole !== undefined) {
     return pair(label, value.whole, current, await read($, order), english, (a, b) => `${a} / ${b}`)
   }
@@ -557,6 +629,30 @@ async function status($: EngineInterface, options: PluginOptions): Promise<strin
   const lines = await Promise.all(all.map(one => describeProvider($, options, one)))
   const head = `translate-bridge: ${MODE_LABEL[now]}${now === 'bilingual' ? ` (${await read($, order)})` : ''}; ${settingsOf(options).language} ⇄ English via`
   return all.length === 1 ? `${head} ${lines[0]}` : `${head}, in this order:\n${lines.map((line, i) => `${i + 1}. ${line}`).join('\n')}`
+}
+
+// Prompts prompt.submit could not translate, by a hash of the text, with why.
+const failedPrompts = new Map<string, string>()
+
+async function translateWritten($: EngineInterface, options: PluginOptions, content: readonly { type: string; [field: string]: unknown }[]) {
+  const current = await read($, mode)
+  if (current === 'off') return
+  const language = settingsOf(options).language
+  for (const block of content) {
+    if (block.type === 'text' && typeof block.text === 'string') {
+      const source = block.text
+      const english = isMostlyEnglish(source)
+      if (english === undefined || (current === 'only' && !english)) continue
+      const target = english ? language : 'English'
+      void translateReply($, options, replyId(target, source), source, target)
+    } else if (block.type === 'tool_use' && typeof block.name === 'string') {
+      const label = labelOf(block.name, block.input)
+      const english = label === undefined ? undefined : isMostlyEnglish(label)
+      if (!label || english === undefined || (current === 'only' && !english)) continue
+      const target = english ? language : 'English'
+      void translateLabel($, options, labelId(target, label), label, target)
+    }
+  }
 }
 
 export const register: Register = (on, options) => {
@@ -615,24 +711,72 @@ export const register: Register = (on, options) => {
       english = await complete($, options, toEnglishPrompt(settingsOf(options).language), e.text, false)
     } catch (error) {
       $.ui.toast(`translate-bridge: sent as typed (${describe(error)})`)
+      failedPrompts.set(hash(e.text.trim()), describe(error))
       return next(e)
     } finally {
       $.ui.status(undefined)
     }
-    // Record the pair both ways: a surface may hand the row the English sent or the text typed.
-    await $.state.set({ ...originalRef, id: hash(english.trim()) }, e.text)
-    await $.state.set({ ...englishRef, id: hash(e.text.trim()) }, english)
+    await rememberPrompt($, e.text, english)
     return next({ ...e, text: english })
   }).catch(($, e, next) => next(e))
+
+  // The prompt's row, as it joins the conversation. A prompt sent before this module loaded
+  // (the first one of a new session can be) never passed prompt.submit: it is translated
+  // here. One that still goes as typed gets a notice in the transcript saying why.
+  on('session.append', { door: 'prompt' }, async ($, e, next) => {
+    if (e.agentId || e.message.isMeta || (await read($, mode)) === 'off') return next(e)
+    const content = e.message.content
+    const typedText = content
+      .filter(block => block.type === 'text' && typeof block.text === 'string')
+      .map(block => block.text as string)
+      .join('\n\n')
+    if (!typedText.trim() || isMostlyEnglish(typedText) !== false) return next(e)
+    const key = hash(typedText.trim())
+    let reason = failedPrompts.get(key)
+    failedPrompts.delete(key)
+    let english: string | undefined
+    if (reason === undefined) {
+      try {
+        english = await complete($, options, toEnglishPrompt(settingsOf(options).language), typedText, false)
+      } catch (error) {
+        reason = describe(error)
+      }
+    }
+    if (english === undefined) {
+      const stored = await next(e)
+      await $.session.append({
+        message: {
+          type: 'system',
+          content: [{ type: 'text', text: `translate-bridge: this prompt reached Claude as typed, untranslated (${reason})` }],
+        },
+      })
+      return stored
+    }
+    await rememberPrompt($, typedText, english)
+    // The prompt's text blocks become the one English text, where the first of them was.
+    let placed = false
+    const rewritten = content.flatMap(block => {
+      if (block.type !== 'text') return [block]
+      if (placed) return []
+      placed = true
+      return [{ type: 'text', text: english }]
+    })
+    return next({ ...e, message: { ...e.message, content: rewritten } })
+  }).catch(($, e, next) => next(e))
+
+  // Each block of Claude's response, as it is written: translated now, so it is ready when it is
+  // drawn, even for a session that is not on screen.
+  on('session.append', { door: 'response' }, async ($, e, next) => {
+    const stored = await next(e)
+    if (!e.agentId) void translateWritten($, options, stored.message?.content ?? e.message.content)
+    return stored
+  })
 
   on('ui.render', { component: 'UserMessage' }, async ($, e, next) => {
     const current = await read($, mode)
     if (current === 'off') return next(e)
     const id = hash(e.props.text.trim())
-    const [{ value: original }, { value: english }] = await Promise.all([
-      $.state.get({ ...originalRef, id }),
-      $.state.get({ ...englishRef, id }),
-    ])
+    const [original, english] = await Promise.all([savedText($, 'original', id), savedText($, 'english', id)])
     const typedText = original ?? (english ? e.props.text : undefined)
     const sent = original ? e.props.text : english
     if (!typedText || !sent) return next(e)
@@ -647,8 +791,8 @@ export const register: Register = (on, options) => {
     if (current === 'off' || english === undefined || (current === 'only' && !english)) return next(e)
 
     const target = english ? settingsOf(options).language : 'English'
-    const id = hash(`reply:${target}:${source}`)
-    const { value } = await $.state.get({ ...translatedRef, id })
+    const id = replyId(target, source)
+    const value = await savedTranslation($, id)
     if (value) {
       return next({ ...e, props: { ...e.props, text: layout(source, value, current, await read($, order), english) } })
     }

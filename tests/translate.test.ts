@@ -87,6 +87,7 @@ async function drawnText(ui: { drawn: () => Promise<RenderElement> }): Promise<s
 test('a Chinese prompt reaches Claude in English', async ($, on) => {
   const seen: Request[] = []
   mock.env(on, KEY)
+  mock.store(on)
   fakeApi(on, seen)
   on('prompt.submit', ($, e) => ({ text: e.text }))
 
@@ -99,6 +100,7 @@ test('a Chinese prompt reaches Claude in English', async ($, on) => {
 test('an English prompt goes as typed, with no API call', async ($, on) => {
   const seen: Request[] = []
   mock.env(on, KEY)
+  mock.store(on)
   fakeApi(on, seen)
   on('prompt.submit', ($, e) => ({ text: e.text }))
 
@@ -110,6 +112,7 @@ test('an English prompt goes as typed, with no API call', async ($, on) => {
 
 test('with no API key the prompt goes as typed', async ($, on) => {
   mock.env(on, {})
+  mock.store(on)
   on('prompt.submit', ($, e) => ({ text: e.text }))
 
   expect(await $.prompt.submit(typed('请列出文件'))).toMatchObject({ text: '请列出文件' })
@@ -118,6 +121,7 @@ test('with no API key the prompt goes as typed', async ($, on) => {
 test('the old DEEPSEEK_API_KEY still works with the DeepSeek API', async ($, on) => {
   const seen: Request[] = []
   mock.env(on, { DEEPSEEK_API_KEY: 'sk-old' })
+  mock.store(on)
   fakeApi(on, seen)
   on('prompt.submit', ($, e) => ({ text: e.text }))
 
@@ -127,6 +131,7 @@ test('the old DEEPSEEK_API_KEY still works with the DeepSeek API', async ($, on)
 for (const shown of ['Please list the files.', '请列出文件']) {
   test(`your message shows both languages when the row is handed "${shown}"`, async ($, on) => {
     mock.env(on, KEY)
+    mock.store(on)
     fakeApi(on, [])
     on('prompt.submit', ($, e) => ({ text: e.text }))
     drawAs(on, 'UserMessage')
@@ -155,6 +160,7 @@ test('a reply is shown paragraph by paragraph: the English as written, then the 
   const seen: Request[] = []
   const clock = mock.clock(on)
   mock.env(on, KEY)
+  mock.store(on)
   fakeApi(on, seen)
   drawAs(on, 'AssistantMessage')
 
@@ -181,6 +187,7 @@ test('when the provider loses the blocks, the whole reply is translated instead'
   const seen: Request[] = []
   const clock = mock.clock(on)
   mock.env(on, KEY)
+  mock.store(on)
   fakeApi(on, seen, { breakBlocks: true })
   drawAs(on, 'AssistantMessage')
 
@@ -201,6 +208,7 @@ test('blocks the provider hands back untranslated are translated again one by on
   const seen: Request[] = []
   const clock = mock.clock(on)
   mock.env(on, KEY)
+  mock.store(on)
   fakeApi(on, seen, { echoBlocks: true })
   drawAs(on, 'AssistantMessage')
 
@@ -223,6 +231,7 @@ test('English prose naming a few Chinese things is still English; a Chinese repl
   const seen: Request[] = []
   const clock = mock.clock(on)
   mock.env(on, KEY)
+  mock.store(on)
   fakeApi(on, seen)
   drawAs(on, 'AssistantMessage')
 
@@ -251,6 +260,7 @@ test('the language option sets the target', { options: { language: 'Japanese' } 
   const seen: Request[] = []
   const clock = mock.clock(on)
   mock.env(on, KEY)
+  mock.store(on)
   fakeApi(on, seen)
   drawAs(on, 'AssistantMessage')
 
@@ -277,6 +287,7 @@ test('a step label is shown bilingually', async ($, on) => {
   const seen: Request[] = []
   const clock = mock.clock(on)
   mock.env(on, KEY)
+  mock.store(on)
   fakeApi(on, seen)
   drawLabels(on)
 
@@ -294,6 +305,7 @@ test('a step label is shown bilingually', async ($, on) => {
 test('a folded group with labelled steps is unfolded, so each step shows its own label', async ($, on) => {
   const seen: Request[] = []
   mock.env(on, KEY)
+  mock.store(on)
   fakeApi(on, seen)
   on('ui.render', { component: 'ToolGroup' }, ($, e) => {
     const { Text } = $.ui.resolve(e)
@@ -315,6 +327,7 @@ test('a folded group with labelled steps is unfolded, so each step shows its own
 
 test('a folded group of steps with no label stays folded', async ($, on) => {
   mock.env(on, KEY)
+  mock.store(on)
   fakeApi(on, [])
   on('ui.render', { component: 'ToolGroup' }, ($, e) => {
     const { Text } = $.ui.resolve(e)
@@ -335,6 +348,7 @@ test('each step in an unfolded group is shown bilingually', async ($, on) => {
   const seen: Request[] = []
   const clock = mock.clock(on)
   mock.env(on, KEY)
+  mock.store(on)
   fakeApi(on, seen)
   drawLabels(on)
 
@@ -359,6 +373,7 @@ test('a reply the app reports as off screen is still translated', async ($, on) 
   const seen: Request[] = []
   const clock = mock.clock(on)
   mock.env(on, KEY)
+  mock.store(on)
   fakeApi(on, seen)
   drawAs(on, 'AssistantMessage')
 
@@ -377,6 +392,7 @@ test('a failed translation is tried again, and is not reported while a retry is 
   const toasts: string[] = []
   const clock = mock.clock(on)
   mock.env(on, KEY)
+  mock.store(on)
   fakeApi(on, seen, { failFirst: 2 })
   drawAs(on, 'AssistantMessage')
   on('ui.toast', ($, e) => {
@@ -446,6 +462,7 @@ function run(command: { run: (input: never) => Promise<unknown> }, args: string)
 test('when the main provider fails, the fallback answers', { options: ZHIPU }, async ($, on) => {
   const seen: Request[] = []
   mock.env(on, BOTH_KEYS)
+  mock.store(on)
   fakeApi(on, seen, { failHosts: ['bigmodel.cn'] })
   on('prompt.submit', ($, e) => ({ text: e.text }))
 
@@ -462,6 +479,7 @@ test('when the main provider fails, the fallback answers', { options: ZHIPU }, a
 test('the main provider uses its own key and default model', { options: ZHIPU }, async ($, on) => {
   const seen: Request[] = []
   mock.env(on, BOTH_KEYS)
+  mock.store(on)
   fakeApi(on, seen)
   on('prompt.submit', ($, e) => ({ text: e.text }))
 
@@ -474,6 +492,7 @@ test('the main provider uses its own key and default model', { options: ZHIPU },
 test('when every provider fails, the notice names each one', { options: ZHIPU }, async ($, on) => {
   const toasts: string[] = []
   mock.env(on, BOTH_KEYS)
+  mock.store(on)
   fakeApi(on, [], { failHosts: ['bigmodel.cn', 'deepseek.com'] })
   on('ui.toast', ($, e) => {
     toasts.push(String(e.text))
@@ -489,6 +508,7 @@ test('when every provider fails, the notice names each one', { options: ZHIPU },
 test('a fallback with no key is skipped, and the notice says where to set it', { options: { ...ZHIPU, fallback: 'qwen' } }, async ($, on) => {
   const toasts: string[] = []
   mock.env(on, { TRANSLATE_BRIDGE_API_KEY: 'sk-zhipu' })
+  mock.store(on)
   fakeApi(on, [], { failHosts: ['bigmodel.cn'] })
   on('ui.toast', ($, e) => {
     toasts.push(String(e.text))
@@ -529,4 +549,145 @@ test('/translate status with one provider keeps to one line', async ($, on) => {
   mock.store(on)
   const answer = JSON.stringify(await run($.command, 'status'))
   expect(answer).toContain('via deepseek: deepseek-flash at https://api.deepseek.com (API key set)')
+})
+
+// The mod's id for a text (cyrb53), to lay out what a store holds after a restart.
+function idOf(value: string): string {
+  let h1 = 0xdeadbeef
+  let h2 = 0x41c6ce57
+  for (let i = 0; i < value.length; i++) {
+    const c = value.charCodeAt(i)
+    h1 = Math.imul(h1 ^ c, 2654435761)
+    h2 = Math.imul(h2 ^ c, 1597334677)
+  }
+  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909)
+  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909)
+  return (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(36)
+}
+
+const WRITTEN = 'Here are the files in the folder you asked about.'
+
+function response(text: string) {
+  return {
+    message: { type: 'assistant' as const, role: 'assistant' as const, content: [{ type: 'text', text }] },
+    door: 'response' as const,
+    origin: { kind: 'model' as const, model: 'test' },
+    uuid: 'r1',
+  }
+}
+
+function promptRow(text: string) {
+  return {
+    message: { type: 'user' as const, role: 'user' as const, content: [{ type: 'text', text }] },
+    door: 'prompt' as const,
+    origin: { kind: 'composer' as const },
+    uuid: 'p1',
+  }
+}
+
+test('a reply is translated as it is written, so it is ready when drawn, and is not translated again', async ($, on) => {
+  const seen: Request[] = []
+  const clock = mock.clock(on)
+  mock.env(on, KEY)
+  mock.store(on)
+  fakeApi(on, seen)
+  drawAs(on, 'AssistantMessage')
+
+  await $.session.append(response(WRITTEN))
+  await clock.advance(10)
+  // translated with nothing on screen
+  expect(seen).toHaveLength(1)
+
+  const ui = await $.ui.mount({
+    plugin: 'translate-bridge',
+    surface: 'desktop',
+    component: 'AssistantMessage',
+    props: { text: WRITTEN, isFirstOfReply: true },
+  })
+  expect(await drawnText(ui)).toContain(`ZH(${WRITTEN})`)
+  await clock.advance(2000)
+  expect(seen).toHaveLength(1)
+})
+
+test('a translation is saved in the store', async ($, on) => {
+  const clock = mock.clock(on)
+  mock.env(on, KEY)
+  // the store in memory, kept here so the test can read it
+  const written: Record<string, unknown> = {}
+  on('store.get', ($, e) => ({ value: written[e.key] }))
+  on('store.set', ($, e) => {
+    written[e.key] = JSON.parse(JSON.stringify(e.value))
+    return { value: undefined }
+  })
+  on('store.delete', ($, e) => {
+    delete written[e.key]
+    return { value: undefined }
+  })
+  on('store.keys', () => ({ value: Object.keys(written) }))
+  fakeApi(on, [])
+
+  await $.session.append(response(WRITTEN))
+  await clock.advance(10)
+  const key = `t:${idOf(`reply:Simplified Chinese:${WRITTEN}`)}`
+  expect(written[key]).toEqual({ blocks: [`ZH(${WRITTEN})`] })
+  expect(JSON.stringify(written.saved)).toContain(key)
+})
+
+test('after a restart, a saved translation is drawn with no API call', async ($, on) => {
+  const seen: Request[] = []
+  const clock = mock.clock(on)
+  mock.env(on, KEY)
+  mock.store(on, { [`t:${idOf(`reply:Simplified Chinese:${WRITTEN}`)}`]: { blocks: ['已保存的译文。'] } })
+  fakeApi(on, seen)
+  drawAs(on, 'AssistantMessage')
+
+  const ui = await $.ui.mount({
+    plugin: 'translate-bridge',
+    surface: 'desktop',
+    component: 'AssistantMessage',
+    props: { text: WRITTEN, isFirstOfReply: true },
+  })
+  expect(await drawnText(ui)).toContain('> 已保存的译文。')
+  await clock.advance(2000)
+  expect(seen).toHaveLength(0)
+})
+
+test('a prompt that reaches the conversation untranslated is translated there', async ($, on) => {
+  const seen: Request[] = []
+  mock.env(on, KEY)
+  mock.store(on)
+  fakeApi(on, seen)
+  const session = mock.session(on)
+
+  await $.session.append(promptRow('请列出文件'))
+  const row = session.appended().find(one => one.door === 'prompt')
+  expect(JSON.stringify(row?.message.content)).toContain('Please list the files.')
+  expect(JSON.stringify(row?.message.content)).not.toContain('请列出文件')
+  expect(seen).toHaveLength(1)
+})
+
+test('a prompt that goes as typed leaves a notice in the transcript saying why', async ($, on) => {
+  mock.env(on, {})
+  mock.store(on)
+  const session = mock.session(on)
+
+  await $.session.append(promptRow('请列出文件'))
+  const rows = session.appended()
+  expect(JSON.stringify(rows.find(one => one.door === 'prompt')?.message.content)).toContain('请列出文件')
+  const notice = rows.find(one => one.door === 'note')
+  expect(notice?.message.type).toBe('system')
+  expect(JSON.stringify(notice?.message.content)).toContain('reached Claude as typed')
+  expect(JSON.stringify(notice?.message.content)).toContain('no API key')
+})
+
+test('a prompt translated when submitted is not translated again as its row is kept', async ($, on) => {
+  const seen: Request[] = []
+  mock.env(on, KEY)
+  mock.store(on)
+  fakeApi(on, seen)
+  on('prompt.submit', ($, e) => ({ text: e.text }))
+
+  const sent = await $.prompt.submit(typed('请列出文件'))
+  await $.session.append(promptRow((sent as { text: string }).text))
+  expect(seen).toHaveLength(1)
 })

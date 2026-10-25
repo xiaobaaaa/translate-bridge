@@ -122,8 +122,9 @@ Use the second way only where the mod isn't loaded already, or it runs twice and
 ### What happens, and when
 
 - Prompts that are already English are sent unchanged, with no API call. Slash commands are never translated.
-- A reply is translated about 1.5 s after it stops streaming, so you'll briefly see the English first. At most 4 translation requests run at once.
-- If a prompt can't be translated (no key, network error, provider error), it is sent as typed and a notice says why. A reply or label that fails is retried twice, 5 s apart, before a notice is shown. Nothing is ever dropped.
+- Each block of a reply, and each step label, is translated as soon as Claude has written it, whether or not the session is on screen. Coming back to a session that worked in the background, you find its replies already translated. A block still streaming on screen is translated about 1.5 s after it stops changing. At most 4 translation requests run at once.
+- Translations are saved, so they survive a restart of the app: a session you reopen shows them again with no new requests. About 1 million characters of them are kept, the oldest dropped first.
+- If a prompt can't be translated (no key, network error, provider error), it is sent as typed and a notice says why. The mod also tries again as the prompt is written into the conversation, which catches a prompt sent before the mod had loaded (the first prompt of a new session can be). One that still goes as typed gets a line in the transcript saying so and why, which Claude does not read. A reply or label that fails is retried twice, 5 s apart, before a notice is shown. Nothing is ever dropped.
 - Only what you **see** changes. Claude's stored conversation stays in English, so Claude's context is never mixed with translations.
 
 ### What isn't translated
@@ -180,5 +181,7 @@ To run your working copy instead of the installed version, start Claude Code wit
 **命令**：`/translate on`（中英对照，默认）、`/translate original-first`（原文在上，默认）、`/translate translation-first`（译文在上）、`/translate only`（只显示中文）、`/translate off`、`/translate provider [名称 | default]`（列出或切换翻译服务商，当前会话立即生效）、`/translate status`。
 
 **已经开着的会话**：新开的会话总会加载本 mod。会话启动时已加载过本 mod（比如旧版本，或改设置之前）：运行 `/reload-plugins`，再用 `/translate status` 检查。会话启动时没加载本 mod（安装之前就开着）：在那个会话里让 Claude 把本 mod 的文件夹复制进该会话自己的 mods 文件夹，Claude Code 会问是否为这个会话打开 mod 热加载，同意后立即加载、不用重启，文件改动后会自动重载。只在没加载本 mod 的会话里这样做，否则会加载两份、每段都翻译两次；这份副本只属于那个会话、不跟随后续更新，重启那个会话前请先删掉它。
+
+**何时翻译**：Claude 每写完一段回复或一个步骤标签就立即翻译，会话不在屏幕上也照样翻，回到会话时已经译好。译文会保存，重启 App 后重新打开会话不必再译（最多保留约 100 万字符，旧的先删）。提示若没能翻译就照原文发出并提示原因；mod 还会在提示写入对话时再试一次，能补上新会话里 mod 尚未加载时发出的第一条提示；仍未翻译的，会在对话记录里留一行说明原因（Claude 不读这一行）。
 
 **注意**：你的提示和 Claude 的回复会发给你配置的翻译服务商。代码块不翻译。"Ran a command" 这类计数行是 Claude Code 自己生成的，没法翻译；所以凡是含有带说明步骤的折叠组，都会自动展开，让每一步显示自己的中英对照标签。
